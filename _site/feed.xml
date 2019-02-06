@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.8.5">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2019-01-25T12:31:52-05:00</updated><id>http://localhost:4000/feed.xml</id><title type="html">Your awesome title</title><subtitle>Write an awesome description for your new site here. You can edit this line in _config.yml. It will appear in your document head meta (for Google search results) and in your feed.xml site description.</subtitle><entry><title type="html">STS Roles and Multi-Account Pivoting</title><link href="http://localhost:4000/aws/sts/roles/2019/01/24/STS-ROLES-AND-ACCOUNT-PIVOTS.html" rel="alternate" type="text/html" title="STS Roles and Multi-Account Pivoting" /><published>2019-01-24T23:46:50-05:00</published><updated>2019-01-24T23:46:50-05:00</updated><id>http://localhost:4000/aws/sts/roles/2019/01/24/STS-ROLES-AND-ACCOUNT-PIVOTS</id><content type="html" xml:base="http://localhost:4000/aws/sts/roles/2019/01/24/STS-ROLES-AND-ACCOUNT-PIVOTS.html">&lt;h1 id=&quot;sts-roles-and-multi-account-pivoting&quot;&gt;STS ROLES and MULTI-ACCOUNT PIVOTING&lt;/h1&gt;
+
+&lt;h2 id=&quot;overview&quot;&gt;Overview&lt;/h2&gt;
+
+&lt;p&gt;During a recent audit of AWS accounts I noticed the lack of a solid way to review the relationship of STS roles between accounts. The problem is, you can easily see what accounts you’re granting access to, but going the other direction is an exercise in patience. I wanted to know, &lt;em&gt;given a number of AWS credentials, how specific accounts were related to one another&lt;/em&gt;. If I could obtain that information, I would be well on my way to discovering pivot points between AWS accounts.&lt;/p&gt;
+
+&lt;h2 id=&quot;multi-account-deployments&quot;&gt;Multi-Account Deployments&lt;/h2&gt;
+
+&lt;p&gt;In AWS, the concept of multi-account deployments isn’t new. It’s a fantastic way to achieve data and operational isolation. It allows you to grant specific access to components of your own account and easily separate environments like Staging and Production. From a user management perspective, it also allows for an interesting method of control using role assumption&lt;/p&gt;
+
+&lt;h2 id=&quot;enabling-a-role&quot;&gt;Enabling a Role&lt;/h2&gt;
+
+&lt;p&gt;AWS allows for the creation of a role, which is then assumable by an external account. This is an interesting concept overall because the default implementation implicitly trusts the entire external account.&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/assets/images/ec2forderekfrombob.png&quot; alt=&quot;EC2 Role&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;This leaves the user management and ability to assume roles up to the entity being granted access, and the permissions that are obtained as a result of that assumption to the entity granting the access.&lt;/p&gt;
+
+&lt;p&gt;Again by default, this is to the entire accounted being granted the access&lt;/p&gt;
+
+&lt;p&gt;As an example, if I am Bob’s Honey Bees account and I want to allow my distributor to access my EC2 instances. I can create a role granting read access to EC2, and provide that access to Derek’s Distribution.&lt;/p&gt;
+
+&lt;p&gt;Now Derek, being a pretty big deal, grants assume role capabilities to only his most trusted employees to take over this EC2 role in Bob’s account. Bob has no idea who has access to assume a role and Derek’s employees don’t have any idea what roles they CAN assume, unless they are provided with the account number or guidance by Derek. Now, Bob COULD discuss terms of this role relationship with Derek and restrict access to a specific user in the Derek’s Distribution account, but that’s not the default.&lt;/p&gt;
+
+&lt;p&gt;So in this limited sense, anyone with the assumerole capability in Derek’s Distribution has full access to the role provided by Bob’s Honey Bees.&lt;/p&gt;
+
+&lt;p&gt;If any of the privileged accounts in Derek’s distribution are compromised, they theoretically have access to Bob’s Bees via this EC2 role, but an attacker wouldn’t necessarily be aware that they have access thorugh this compromised account.&lt;/p&gt;
+
+&lt;h2 id=&quot;complicated&quot;&gt;Complicated&lt;/h2&gt;
+
+&lt;p&gt;The complication starts when multiple accounts are compromised. Enter Bob’s IAM administrator. This guy, let’s call him James, only has read access to IAM in Bob’s Honey Bee’s. This is really great because Bob doesn’t know anything about IAM and needs James to review policies and permissions. James is pretty careless with his AWS creds, but Bob’s not too worried about them being on pastebin, because honestly he’s only got access to this small slice of his AWS console world.&lt;/p&gt;
+
+&lt;p&gt;If an attacker is able to obtain aws credentials in the wild, there is a rare occasion that two accounts might be connected to create an interesting pivot point. In this case any compromised account on Derek’s Distribution with assume role capabilities and an account with read access to IAM on Bob’s Honey Bees, like James.&lt;/p&gt;
+
+&lt;p&gt;So now, I have James’ (from Bob’s) credentials, and I’ve got Johnny’s credentials. Johnny is a new guy over at Derek’s with the assume role capability. He’s also a pastebin afficionado.&lt;/p&gt;
+
+&lt;p&gt;How would I ever know that these accounts are even remotely connected?&lt;/p&gt;
+
+&lt;h2 id=&quot;quick-recap&quot;&gt;Quick Recap&lt;/h2&gt;
+
+&lt;p&gt;Either as an auditor or a lucky researcher I’ve got two users from separate accounts with list roles permissions, and ONE of these users has the ability to assume a role in another account&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/assets/images/Roles.png&quot; alt=&quot;Roles and Accounts&quot; /&gt;&lt;/p&gt;
+
+&lt;h2 id=&quot;enter-an-enumeration-script&quot;&gt;Enter an enumeration script:&lt;/h2&gt;
+
+&lt;p&gt;This script will run through all credentials in the profiles you specify based on your boto3 credentials file and show you any links that will provide you with some potential pivoting.&lt;/p&gt;
+
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;import boto3
+
+# Use profiles that exist in your ~/.aws/credentials file
+# Add to the array with any additional profiles for this to work i.e. [&quot;default&quot;,&quot;profile0&quot;,&quot;profile1&quot;] etc.
+profiles = [&quot;default&quot;] 
+
+assumable_accounts = {}
+assuming_accounts = []
+
+# Iterate over Profiles
+for profile in profiles:
+	dev = boto3.session.Session(profile_name=profile)
+	print &quot;*******************&quot;
+	print &quot;ENUMERATING Profile&quot;
+	print &quot;*******************&quot;
+
+	# Set the profile
+	current_account = dev.client('sts').get_caller_identity().get('Account')
+	
+	print(profile + &quot;:&quot; + current_account)
+	
+	client = dev.client('iam', region_name=&quot;us-east-1&quot;)
+	response = client.list_roles()
+	
+	# Get Roles that are Assumable by other AWS Accounts (Currently doesn't include those managed by SCP)
+	roles = response.get(&quot;Roles&quot;)
+	assumable_accounts[current_account] = []
+	print &quot;___________________________________________________________________&quot;
+	print &quot;Roles that can be Assumed by Other AWS Accounts:&quot;
+	print &quot;___________________________________________________________________&quot;
+	for role in roles:
+		if &quot;AWS&quot; in role[&quot;AssumeRolePolicyDocument&quot;][&quot;Statement&quot;][0][&quot;Principal&quot;]:
+			print(role[&quot;RoleId&quot;] + &quot;/&quot; + role[&quot;RoleName&quot;])
+			assumable_role = role[&quot;AssumeRolePolicyDocument&quot;][&quot;Statement&quot;][0][&quot;Principal&quot;][&quot;AWS&quot;]+ &quot;/&quot; + role[&quot;RoleName&quot;]
+			assumable_accounts[current_account].append(assumable_role)
+
+print &quot;**************************************************************&quot;
+print &quot;*Iteration on what can be assumed with the provided Profiles:*&quot;
+print &quot;**************************************************************&quot;
+
+# Find out if your profiles can talk to each other and through what roles
+for account in assumable_accounts:
+	print &quot;___________________________________________________________________&quot;
+	print &quot;ACCOUNT: &quot; + account + &quot; contains the following assumable accounts:&quot;
+	print &quot;___________________________________________________________________&quot;
+
+	for role in assumable_accounts[account]:
+		for search_account in assumable_accounts:
+			if search_account in role:
+				print &quot;You have access to the &quot; + search_account + &quot; account which can be used to assume -&amp;gt; &quot; + role
+			
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;And Kazaam!&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/assets/images/scriptoutput.png&quot; alt=&quot;Script Output&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;We can see that my compromise of James allows me to see that Johnny can assume the EC2 Read role, and that there is an additional assumable administrative role. This allows me to connect some dots and gain some additional information on the second account. There is also the potential that additional account roles are shared to external accounts and sometimes this is an administrative role.&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/assets/images/switching-roles.png&quot; alt=&quot;Switch Roles&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/assets/images/logged-in-as-new-role.png&quot; alt=&quot;Logged In&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;For Public AWS credential collectors, this is useful - especially where support organizations are provided assumable roles to many clients.&lt;/p&gt;
+
+&lt;p&gt;I hope this short post is helpful or in the very least interesting, and if you want to give the script a go for yourself, check out my gist.&lt;/p&gt;
+
+&lt;p&gt;https://gist.github.com/relotnek/d9fc32be9ae5658426c64e7951b30c28&lt;/p&gt;
+
+&lt;p&gt;-Ken&lt;/p&gt;</content><author><name></name></author><summary type="html">STS ROLES and MULTI-ACCOUNT PIVOTING</summary></entry><entry><title type="html">Welcome to Jekyll!</title><link href="http://localhost:4000/jekyll/update/2019/01/24/welcome-to-jekyll.html" rel="alternate" type="text/html" title="Welcome to Jekyll!" /><published>2019-01-24T23:46:50-05:00</published><updated>2019-01-24T23:46:50-05:00</updated><id>http://localhost:4000/jekyll/update/2019/01/24/welcome-to-jekyll</id><content type="html" xml:base="http://localhost:4000/jekyll/update/2019/01/24/welcome-to-jekyll.html">&lt;p&gt;You’ll find this post in your &lt;code class=&quot;highlighter-rouge&quot;&gt;_posts&lt;/code&gt; directory. Go ahead and edit it and re-build the site to see your changes. You can rebuild the site in many different ways, but the most common way is to run &lt;code class=&quot;highlighter-rouge&quot;&gt;jekyll serve&lt;/code&gt;, which launches a web server and auto-regenerates your site when a file is updated.&lt;/p&gt;
+
+&lt;p&gt;To add new posts, simply add a file in the &lt;code class=&quot;highlighter-rouge&quot;&gt;_posts&lt;/code&gt; directory that follows the convention &lt;code class=&quot;highlighter-rouge&quot;&gt;YYYY-MM-DD-name-of-post.ext&lt;/code&gt; and includes the necessary front matter. Take a look at the source for this post to get an idea about how it works.&lt;/p&gt;
+
+&lt;p&gt;Jekyll also offers powerful support for code snippets:&lt;/p&gt;
+
+&lt;figure class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-ruby&quot; data-lang=&quot;ruby&quot;&gt;&lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;print_hi&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;name&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+  &lt;span class=&quot;nb&quot;&gt;puts&lt;/span&gt; &lt;span class=&quot;s2&quot;&gt;&quot;Hi, &lt;/span&gt;&lt;span class=&quot;si&quot;&gt;#{&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;name&lt;/span&gt;&lt;span class=&quot;si&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;&lt;/span&gt;
+&lt;span class=&quot;k&quot;&gt;end&lt;/span&gt;
+&lt;span class=&quot;n&quot;&gt;print_hi&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s1&quot;&gt;'Tom'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;c1&quot;&gt;#=&amp;gt; prints 'Hi, Tom' to STDOUT.&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/figure&gt;
+
+&lt;p&gt;Check out the &lt;a href=&quot;https://jekyllrb.com/docs/home&quot;&gt;Jekyll docs&lt;/a&gt; for more info on how to get the most out of Jekyll. File all bugs/feature requests at &lt;a href=&quot;https://github.com/jekyll/jekyll&quot;&gt;Jekyll’s GitHub repo&lt;/a&gt;. If you have questions, you can ask them on &lt;a href=&quot;https://talk.jekyllrb.com/&quot;&gt;Jekyll Talk&lt;/a&gt;.&lt;/p&gt;</content><author><name></name></author><summary type="html">You’ll find this post in your _posts directory. Go ahead and edit it and re-build the site to see your changes. You can rebuild the site in many different ways, but the most common way is to run jekyll serve, which launches a web server and auto-regenerates your site when a file is updated.</summary></entry></feed>
